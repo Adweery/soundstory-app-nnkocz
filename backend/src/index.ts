@@ -1,6 +1,7 @@
 import { createApplication } from "@specific-dev/framework";
 import * as schema from './db/schema.js';
 import * as sessionsRoutes from './routes/sessions.js';
+import * as transcribeRoutes from './routes/transcribe.js';
 
 // Create application with schema for full database type support
 export const app = await createApplication(schema);
@@ -10,6 +11,7 @@ export type App = typeof app;
 
 // Register routes
 sessionsRoutes.register(app, app.fastify);
+transcribeRoutes.register(app, app.fastify);
 
 await app.run();
 app.logger.info('Application running');
