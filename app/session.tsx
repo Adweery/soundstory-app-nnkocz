@@ -23,6 +23,7 @@ import Animated, {
   Easing,
 } from "react-native-reanimated";
 import { BACKEND_URL, apiPost, apiGet, testBackendConnection } from "@/utils/api";
+import { audioManager } from "@/utils/audioManager";
 
 type AnalysisResult = {
   transcription: string;
@@ -59,6 +60,7 @@ export default function SessionScreen() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [sessionHistory, setSessionHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [audioInitialized, setAudioInitialized] = useState(false);
   
   // Volume controls
   const [musicVolume, setMusicVolume] = useState(0.7);
@@ -77,6 +79,9 @@ export default function SessionScreen() {
   useEffect(() => {
     console.log('[Session] Screen mounted with preset:', preset);
     console.log('[Session] Backend URL:', BACKEND_URL);
+    
+    // Initialize audio system
+    initializeAudio();
     
     // Test backend connection first
     testBackendConnection().then((isConnected) => {
@@ -98,6 +103,7 @@ export default function SessionScreen() {
       console.log('[Session] Screen unmounting, cleaning up');
       stopRecording();
       endSession();
+      cleanupAudio();
     };
   }, []);
 
@@ -123,6 +129,27 @@ export default function SessionScreen() {
     transform: [{ scale: micScale.value }],
     opacity: micOpacity.value,
   }));
+
+  const initializeAudio = async () => {
+    console.log('[Session] Initializing audio system');
+    try {
+      await audioManager.initialize();
+      setAudioInitialized(true);
+      console.log('[Session] Audio system ready');
+    } catch (error) {
+      console.error('[Session] Failed to initialize audio:', error);
+      Alert.alert('Audio Error', 'Failed to initialize audio system. Sound may not work properly.');
+    }
+  };
+
+  const cleanupAudio = async () => {
+    console.log('[Session] Cleaning up audio');
+    try {
+      await audioManager.cleanup();
+    } catch (error) {
+      console.error('[Session] Error cleaning up audio:', error);
+    }
+  };
 
   const requestPermissions = async () => {
     console.log('Requesting audio permissions');
@@ -253,8 +280,15 @@ export default function SessionScreen() {
         mood: data.analysis.mood,
         setting: data.analysis.setting,
         intensity: data.analysis.intensity,
-        narrativeEvent: data.analysis.narrativeEvent
+        narrativeEvent: data.analysis.narrativeEvent,
+        soundscapeSuggestions: data.analysis.soundscapeSuggestions
       });
+
+      // Update audio based on analysis
+      if (audioInitialized && data.analysis.soundscapeSuggestions) {
+        console.log('[Session] Updating soundscape with new suggestions');
+        await audioManager.updateSoundscape(data.analysis.soundscapeSuggestions);
+      }
 
     } catch (error) {
       console.error('[Session] Error processing audio chunk:', error);
@@ -291,6 +325,27 @@ export default function SessionScreen() {
     }
   };
 
+  const handleMusicVolumeChange = async (volume: number) => {
+    setMusicVolume(volume);
+    if (audioInitialized) {
+      await audioManager.setMusicVolume(volume);
+    }
+  };
+
+  const handleAmbienceVolumeChange = async (volume: number) => {
+    setAmbienceVolume(volume);
+    if (audioInitialized) {
+      await audioManager.setAmbienceVolume(volume);
+    }
+  };
+
+  const handleSfxVolumeChange = (volume: number) => {
+    setSfxVolume(volume);
+    if (audioInitialized) {
+      audioManager.setSfxVolume(volume);
+    }
+  };
+
   const handleEndSession = () => {
     console.log('User tapped End Session button');
     Alert.alert(
@@ -303,6 +358,7 @@ export default function SessionScreen() {
           style: 'destructive',
           onPress: async () => {
             await stopRecording();
+            await audioManager.stopAll();
             await endSession();
             router.back();
           },
@@ -324,7 +380,7 @@ export default function SessionScreen() {
       />
 
       {/* Main Content */}
-      <View style={styles.content}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Microphone Indicator */}
         <View style={styles.micSection}>
           <Animated.View style={[styles.micCircle, micAnimatedStyle]}>
@@ -338,6 +394,12 @@ export default function SessionScreen() {
           <Text style={styles.statusText}>
             {isRecording ? 'Listening...' : 'Tap to start recording'}
           </Text>
+          {!audioInitialized && (
+            <Text style={styles.audioStatusText}>Initializing audio system...</Text>
+          )}
+          {audioInitialized && (
+            <Text style={styles.audioStatusText}>🔊 Audio system ready</Text>
+          )}
           {isAnalyzing && (
             <View style={styles.analyzingContainer}>
               <ActivityIndicator size="small" color={colors.primary} />
@@ -379,6 +441,21 @@ export default function SessionScreen() {
                 </Text>
               </View>
             )}
+            {currentAnalysis.analysis.soundscapeSuggestions && (
+              <View style={styles.soundscapeContainer}>
+                <Text style={styles.soundscapeLabel}>🎵 Active Soundscape:</Text>
+                {currentAnalysis.analysis.soundscapeSuggestions.musicTrack && (
+                  <Text style={styles.soundscapeText}>
+                    Music: {currentAnalysis.analysis.soundscapeSuggestions.musicTrack}
+                  </Text>
+                )}
+                {currentAnalysis.analysis.soundscapeSuggestions.ambientTrack && (
+                  <Text style={styles.soundscapeText}>
+                    Ambience: {currentAnalysis.analysis.soundscapeSuggestions.ambientTrack}
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
         )}
 
@@ -399,7 +476,7 @@ export default function SessionScreen() {
               minimumValue={0}
               maximumValue={1}
               value={musicVolume}
-              onValueChange={setMusicVolume}
+              onValueChange={handleMusicVolumeChange}
               minimumTrackTintColor={colors.primary}
               maximumTrackTintColor={colors.textSecondary}
               thumbTintColor={colors.primary}
@@ -420,7 +497,7 @@ export default function SessionScreen() {
               minimumValue={0}
               maximumValue={1}
               value={ambienceVolume}
-              onValueChange={setAmbienceVolume}
+              onValueChange={handleAmbienceVolumeChange}
               minimumTrackTintColor={colors.primary}
               maximumTrackTintColor={colors.textSecondary}
               thumbTintColor={colors.primary}
@@ -441,7 +518,7 @@ export default function SessionScreen() {
               minimumValue={0}
               maximumValue={1}
               value={sfxVolume}
-              onValueChange={setSfxVolume}
+              onValueChange={handleSfxVolumeChange}
               minimumTrackTintColor={colors.primary}
               maximumTrackTintColor={colors.textSecondary}
               thumbTintColor={colors.primary}
@@ -498,7 +575,7 @@ export default function SessionScreen() {
             ))}
           </View>
         </View>
-      </View>
+      </ScrollView>
 
       {/* Bottom Controls */}
       <View style={styles.bottomControls}>
@@ -620,6 +697,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
   },
+  audioStatusText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
   analyzingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -674,6 +756,23 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontStyle: 'italic',
     lineHeight: 20,
+  },
+  soundscapeContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.highlight,
+  },
+  soundscapeLabel: {
+    fontSize: 12,
+    color: colors.primary,
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  soundscapeText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 2,
   },
   controlsCard: {
     backgroundColor: colors.card,
