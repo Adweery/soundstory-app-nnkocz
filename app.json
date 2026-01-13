@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "SoundStory",
+    "slug": "SoundStory",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/natively-dark.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/natively-dark.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F0A1E"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.SoundStory",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "SoundStory needs access to your microphone to listen to your storytelling and create adaptive soundscapes.",
+        "NSSpeechRecognitionUsageDescription": "SoundStory uses speech recognition to analyze your narration and adapt the audio atmosphere."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/natively-dark.png",
+        "backgroundColor": "#0F0A1E"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.anonymous.SoundStory",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/final_quest_240x240.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-router",
+      "expo-web-browser",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "SoundStory needs access to your microphone to listen to your storytelling and create adaptive soundscapes."
+        }
+      ]
+    ],
+    "scheme": "soundstory",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "backendUrl": "https://db6zt9n339ersjcw7t8d25qg5bbaw8q6.app.specular.dev"
+    }
+  },
+  "scheme": "SoundStory"
+}
