@@ -70,7 +70,6 @@ export default function SessionScreen() {
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const transcriptionBufferRef = useRef<string>("");
 
   // Animation for microphone indicator
   const micScale = useSharedValue(1);
@@ -152,7 +151,7 @@ export default function SessionScreen() {
   };
 
   const requestPermissions = async () => {
-    console.log('Requesting audio permissions');
+    console.log('[Session] Requesting audio permissions');
     try {
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
@@ -161,9 +160,11 @@ export default function SessionScreen() {
           'SoundStory needs microphone access to listen to your storytelling.',
           [{ text: 'OK' }]
         );
+      } else {
+        console.log('[Session] Microphone permission granted');
       }
     } catch (error) {
-      console.error('Error requesting permissions:', error);
+      console.error('[Session] Error requesting permissions:', error);
     }
   };
 
@@ -194,36 +195,62 @@ export default function SessionScreen() {
   };
 
   const startRecording = async () => {
-    console.log('User tapped Start Recording button');
+    console.log('[Session] User tapped Start Recording button');
     try {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        interruptionModeIOS: 1,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
       });
 
       const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      await recording.prepareToRecordAsync({
+        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        android: {
+          extension: '.m4a',
+          outputFormat: 2,
+          audioEncoder: 3,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+        },
+        ios: {
+          extension: '.m4a',
+          outputFormat: 'mpeg4AAC',
+          audioQuality: Audio.IOSAudioQuality.HIGH,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {
+          mimeType: 'audio/webm',
+          bitsPerSecond: 128000,
+        },
+      });
       await recording.startAsync();
       
       recordingRef.current = recording;
       setIsRecording(true);
-      console.log('Recording started');
+      console.log('[Session] Recording started - listening to real microphone');
 
-      // Process audio chunks every 5 seconds for analysis
+      // Process audio chunks every 5 seconds for real-time transcription
       recordingIntervalRef.current = setInterval(() => {
         processAudioChunk();
       }, 5000);
 
     } catch (error) {
-      console.error('Error starting recording:', error);
+      console.error('[Session] Error starting recording:', error);
       Alert.alert('Error', 'Failed to start recording. Please check microphone permissions.');
     }
   };
 
   const stopRecording = async () => {
-    console.log('User tapped Stop Recording button');
+    console.log('[Session] User tapped Stop Recording button');
     try {
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
@@ -236,42 +263,76 @@ export default function SessionScreen() {
       }
 
       setIsRecording(false);
-      console.log('Recording stopped');
+      console.log('[Session] Recording stopped');
     } catch (error) {
-      console.error('Error stopping recording:', error);
+      console.error('[Session] Error stopping recording:', error);
     }
   };
 
   const processAudioChunk = async () => {
-    if (!recordingRef.current || !sessionId) return;
+    if (!recordingRef.current || !sessionId) {
+      console.log('[Session] Cannot process audio chunk - no recording or session');
+      return;
+    }
 
-    console.log('[Session] Processing audio chunk for analysis');
+    console.log('[Session] Processing audio chunk from real microphone');
     setIsAnalyzing(true);
 
     try {
-      // For demo purposes, we'll simulate transcription
-      // In a real app, you would:
-      // 1. Stop recording temporarily
-      // 2. Get the audio file
-      // 3. Convert to base64
-      // 4. Send to backend for Whisper transcription
-      
-      // Simulate transcription with sample text
-      const sampleTranscriptions = [
-        "The heroes cautiously enter the dark dungeon, their torches flickering in the damp air.",
-        "A mysterious figure emerges from the shadows, cloaked in darkness.",
-        "The battle intensifies as the dragon roars, flames erupting from its massive jaws.",
-        "The children settle down as the gentle fairy tale begins, soft and peaceful.",
-        "An epic quest awaits, with magic and wonder around every corner.",
-      ];
-      
-      const randomTranscription = sampleTranscriptions[Math.floor(Math.random() * sampleTranscriptions.length)];
-      transcriptionBufferRef.current = randomTranscription;
+      // Stop current recording temporarily to get the audio file
+      const uri = recordingRef.current.getURI();
+      if (!uri) {
+        console.error('[Session] No recording URI available');
+        setIsAnalyzing(false);
+        return;
+      }
 
+      console.log('[Session] Recording URI:', uri);
+
+      // Create form data with the audio file
+      const formData = new FormData();
+      
+      // For web, we need to fetch the blob first
+      if (Platform.OS === 'web') {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        formData.append('audio', blob, 'recording.webm');
+      } else {
+        // For native platforms
+        formData.append('audio', {
+          uri: uri,
+          type: 'audio/m4a',
+          name: 'recording.m4a',
+        } as any);
+      }
+
+      console.log('[Session] Sending audio to backend for transcription');
+      
+      // Send to transcription endpoint
+      const transcriptionResponse = await fetch(`${BACKEND_URL}/api/transcribe`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!transcriptionResponse.ok) {
+        throw new Error(`Transcription failed: ${transcriptionResponse.status}`);
+      }
+
+      const transcriptionData = await transcriptionResponse.json();
+      const transcription = transcriptionData.transcription;
+
+      console.log('[Session] Transcription received:', transcription);
+
+      if (!transcription || transcription.trim().length === 0) {
+        console.log('[Session] Empty transcription, skipping analysis');
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // Now send transcription to analysis endpoint
       console.log('[Session] Sending transcription to backend for analysis');
-      // Send transcription to backend for analysis
       const data: AnalysisResult = await apiPost(`/api/sessions/${sessionId}/analyze`, { 
-        transcription: randomTranscription 
+        transcription 
       });
       
       setCurrentAnalysis(data);
@@ -347,7 +408,7 @@ export default function SessionScreen() {
   };
 
   const handleEndSession = () => {
-    console.log('User tapped End Session button');
+    console.log('[Session] User tapped End Session button');
     Alert.alert(
       'End Session',
       'Are you sure you want to end this storytelling session?',
@@ -392,7 +453,7 @@ export default function SessionScreen() {
             />
           </Animated.View>
           <Text style={styles.statusText}>
-            {isRecording ? 'Listening...' : 'Tap to start recording'}
+            {isRecording ? '🎤 Listening to your voice...' : 'Tap Start to begin recording'}
           </Text>
           {!audioInitialized && (
             <Text style={styles.audioStatusText}>Initializing audio system...</Text>
@@ -403,7 +464,7 @@ export default function SessionScreen() {
           {isAnalyzing && (
             <View style={styles.analyzingContainer}>
               <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.analyzingText}>Analyzing...</Text>
+              <Text style={styles.analyzingText}>Analyzing your narration...</Text>
             </View>
           )}
         </View>
@@ -435,7 +496,7 @@ export default function SessionScreen() {
             </View>
             {currentAnalysis.transcription && (
               <View style={styles.transcriptionContainer}>
-                <Text style={styles.transcriptionLabel}>Last heard:</Text>
+                <Text style={styles.transcriptionLabel}>Last heard from microphone:</Text>
                 <Text style={styles.transcriptionText}>
                   &quot;{currentAnalysis.transcription}&quot;
                 </Text>
@@ -696,6 +757,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: colors.text,
+    textAlign: 'center',
   },
   audioStatusText: {
     fontSize: 14,
